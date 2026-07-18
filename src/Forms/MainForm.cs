@@ -26,11 +26,16 @@ public partial class MainForm : Form
 
     public MainForm()
     {
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        DoubleBuffered = true;
+        SuspendLayout();
         InitializeComponent();
         WireRuntimePaintHandlers();
         ApplyVisualStudioTheme();
         CreateGamePathPill();
         LoadHeaderAssets();
+        ApplyDoubleBuffering(this);
+        ResumeLayout(false);
 
         if (IsInDesigner())
             return;
@@ -706,10 +711,34 @@ public partial class MainForm : Form
         using var pen = new Pen(VsBorder, 1f);
         e.Graphics.DrawRectangle(pen, 0, 0, panel.Width - 1, panel.Height - 1);
     }
+
+    private static void ApplyDoubleBuffering(Control control)
+    {
+        control.GetType()
+            .GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?.SetValue(control, true, null);
+
+        foreach (Control child in control.Controls)
+            ApplyDoubleBuffering(child);
+    }
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            if (!IsInDesigner())
+                cp.ExStyle |= WS_EX_COMPOSITED;
+
+            return cp;
+        }
+    }
+
     [DllImport("user32.dll")]
     private static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
     private const int EM_SETMARGINS = 0xD3;
     private const int EC_LEFTMARGIN = 0x1;
+    private const int WS_EX_COMPOSITED = 0x02000000;
 
     protected override void OnHandleCreated(EventArgs e)
     {

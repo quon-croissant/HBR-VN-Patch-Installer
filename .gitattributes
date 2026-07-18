@@ -1,0 +1,19 @@
+* text=auto eol=crlf
+
+# Windows/.NET project files use CRLF in the working tree.
+*.cs          text eol=crlf
+*.csproj      text eol=crlf
+*.sln         text eol=crlf
+*.slnx        text eol=crlf
+*.resx        text eol=crlf
+*.manifest    text eol=crlf
+*.json        text eol=crlf
+*.md          text eol=crlf
+*.editorconfig text eol=crlf
+*.gitattributes text eol=crlf
+*.gitignore   text eol=crlf
+
+# Embedded assets must never be line-ending normalized.
+*.png binary
+*.ico binary
+*.otf binary

@@ -20,6 +20,7 @@ public sealed partial class TosForm : Form
     private RadioButton? _optAgree;
     private RadioButton? _optDisagree;
     private readonly bool _requireAcceptance;
+    private bool _termsLoaded;
 
     public bool AcceptedTerms { get; private set; }
 
@@ -29,6 +30,8 @@ public sealed partial class TosForm : Form
         InitializeComponent();
         BuildUi();
         LoadLogo();
+        LoadTermsText();
+        ApplyTermsTextFormatting();
         WireEventHandlers();
     }
 
@@ -40,7 +43,10 @@ public sealed partial class TosForm : Form
 
     private void BuildUi()
     {
+        SuspendLayout();
         Text = "Terms of Service";
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        DoubleBuffered = true;
         ShowIcon = false;
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -86,8 +92,12 @@ public sealed partial class TosForm : Form
         {
             BackColor = VsEditor,
             Location = new Point(18, 122),
-            Size = _requireAcceptance ? new Size(524, 328) : new Size(524, 368)
+            Size = _requireAcceptance ? new Size(524, 328) : new Size(524, 368),
+            TabStop = false
         };
+        _termsBorder.GetType()
+            .GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?.SetValue(_termsBorder, true, null);
         _txtTerms = new RichTextBox
         {
             BackColor = VsEditor,
@@ -132,6 +142,20 @@ public sealed partial class TosForm : Form
             Controls.Add(_optDisagree!);
         }
         Controls.Add(_btnClose);
+        ApplyDoubleBuffering(this);
+        ResumeLayout(false);
+    }
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            if (!IsInDesigner())
+                cp.ExStyle |= WsExComposited;
+
+            return cp;
+        }
     }
 
     private void WireEventHandlers()
@@ -153,8 +177,6 @@ public sealed partial class TosForm : Form
             {
                 BeginInvoke(() =>
                 {
-                    LoadTermsText();
-                    ApplyTermsTextFormatting();
                     _btnClose.Focus();
                 });
             };
@@ -265,6 +287,16 @@ public sealed partial class TosForm : Form
     {
         using var border = new Pen(VsBorder, 1f);
         e.Graphics.DrawRectangle(border, 0, 0, _termsBorder.Width - 1, _termsBorder.Height - 1);
+    }
+
+    private static void ApplyDoubleBuffering(Control control)
+    {
+        control.GetType()
+            .GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?.SetValue(control, true, null);
+
+        foreach (Control child in control.Controls)
+            ApplyDoubleBuffering(child);
     }
 
     private void ApplyRoundedCloseButton()
@@ -384,6 +416,9 @@ public sealed partial class TosForm : Form
 
     private void LoadTermsText()
     {
+        if (_termsLoaded)
+            return;
+
         var regularFont = _txtTerms.Font;
         var boldFont = new Font(regularFont, FontStyle.Bold);
 
@@ -403,6 +438,7 @@ public sealed partial class TosForm : Form
         _txtTerms.SelectionStart = 0;
         _txtTerms.SelectionLength = 0;
         _txtTerms.ResumeLayout();
+        _termsLoaded = true;
     }
 
     private static List<(string Text, bool IsBold)> ParseBoldMarkup(string source)
@@ -473,7 +509,6 @@ public sealed partial class TosForm : Form
             return;
 
         ShowIcon = false;
-        LoadTermsText();
         ApplyTermsTextFormatting();
         ApplyWindowsTitleBarTheme();
         ApplyNativeScrollbarTheme();
@@ -598,6 +633,7 @@ public sealed partial class TosForm : Form
     private const int EmSetRect = 0xB3;
     private const uint PfmAlignment = 0x8;
     private const short PfaJustify = 4;
+    private const int WsExComposited = 0x02000000;
 
     private const string TermsText =
 @"<b>1. CÁC GIỚI HẠN</b>
