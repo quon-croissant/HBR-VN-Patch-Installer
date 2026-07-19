@@ -583,7 +583,7 @@ partial class MainForm
         _rtbLog.Location = new Point(10, 10);
         _rtbLog.Name = "_rtbLog";
         _rtbLog.ReadOnly = true;
-        _rtbLog.ScrollBars = RichTextBoxScrollBars.Vertical;
+        _rtbLog.ScrollBars = RichTextBoxScrollBars.None;
         _rtbLog.Size = new Size(614, 123);
         _rtbLog.TabIndex = 0;
         _rtbLog.Text = "";

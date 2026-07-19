@@ -16,7 +16,7 @@ public partial class MainForm : Form
     private static readonly Color VsDanger = Color.FromArgb(255, 118, 137);
     private static readonly Color VsWarning = Color.FromArgb(255, 184, 142);
 
-    private readonly GitHubService _github = new("quon-croissant", "HBR-EN_Vi-Patch");
+    private readonly GitHubService _github = new("vnkeyfc", "HBR-EN_VN-Patch");
     private readonly PatchManager _patchManager = new();
     private readonly ToolTip _toolTip = new();
     private readonly HashSet<Button> _roundedButtons = new();

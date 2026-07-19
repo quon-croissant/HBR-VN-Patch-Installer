@@ -14,13 +14,19 @@ public class GitHubService
 
     public async Task<(string version, string downloadUrl, string fileName)?> GetLatestReleaseAsync()
     {
-        var url = $"https://api.github.com/repos/{_repoOwner}/{_repoName}/releases/latest";
+        var url = $"https://api.github.com/repos/{_repoOwner}/{_repoName}/releases?per_page=20";
         var json = await Http.GetStringAsync(url);
-        var latest = JObject.Parse(json);
+        var releases = JArray.Parse(json);
+        var latest = releases.FirstOrDefault(release =>
+            release["draft"]?.Value<bool>() != true
+            && release["assets"]?.Any(asset =>
+                asset["name"]?.ToString().EndsWith(".zip", StringComparison.OrdinalIgnoreCase) == true) == true);
+
+        if (latest == null) return null;
 
         var version = latest["tag_name"]?.ToString();
         var asset = latest["assets"]?.FirstOrDefault(a =>
-            a["name"]?.ToString().EndsWith(".zip") == true);
+            a["name"]?.ToString().EndsWith(".zip", StringComparison.OrdinalIgnoreCase) == true);
         var downloadUrl = asset?["browser_download_url"]?.ToString();
         var fileName = asset?["name"]?.ToString();
 
