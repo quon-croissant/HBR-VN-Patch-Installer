@@ -8,7 +8,7 @@
 
 HBR VN Patch Installer giúp người dùng cài đặt, cập nhật và gỡ bản Việt hóa Heaven Burns Red thông qua giao diện Windows. Chương trình tự nhận diện thư mục game, kiểm tra phiên bản patch mới nhất trên GitHub Releases và tải gói cài đặt phù hợp.
 
-Bản Việt hóa được phát triển bởi **Vietnam Key FanClub** và phát hành tại [HBR-EN_VN-Patch](https://github.com/vnkeyfc/HBR-EN_VN-Patch/releases).
+Bản Việt hóa được phát triển bởi **Vietnam Key FanClub** và phát hành tại [HBR-EN_VN-Patch](https://github.com/vnkeyfc/HBR-EN_VN-Patch).
 
 ## Giao diện
 
