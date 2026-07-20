@@ -23,6 +23,7 @@ public partial class MainForm : Form
     private readonly Dictionary<Button, Color> _buttonNormalBackColors = new();
     private readonly Panel _gamePathPill = new();
     private string _latestVersion = "—";
+    private string? _latestReleaseVersion;
 
     public MainForm()
     {
@@ -123,14 +124,16 @@ public partial class MainForm : Form
         try
         {
             var release = await _github.GetLatestReleaseAsync();
-            _latestVersion = release != null ? release.Value.version : "Không lấy được";
+            _latestReleaseVersion = release?.version;
+            _latestVersion = _latestReleaseVersion ?? "Không lấy được";
         }
         catch
         {
+            _latestReleaseVersion = null;
             _latestVersion = "Lỗi kết nối";
         }
-        // Cập nhật label trực tiếp, không qua RefreshStatus
-        _lblLatestVersion.Text = _latestVersion;
+
+        RefreshStatus();
     }
 
     private void BtnBrowse_Click(object? sender, EventArgs e)
@@ -181,7 +184,9 @@ public partial class MainForm : Form
 
         if (_patchManager.IsInstalled(path))
         {
-            _lblInstalledVersion.Text = _patchManager.GetInstalledVersion(path);
+            var installedVersion = _patchManager.GetInstalledVersion(path);
+            var updateAvailable = IsUpdateAvailable(installedVersion);
+            _lblInstalledVersion.Text = installedVersion;
             _lblLatestVersion.Text = _latestVersion;
             _lblPatchStatus.Text = "Đã cài đặt ✔";
             _lblPatchStatus.ForeColor = VsAccentHover;
@@ -192,8 +197,9 @@ public partial class MainForm : Form
             _btnInstall.Enabled = false;
             StyleCommandButton(_btnInstall, ButtonKind.Disabled);
 
-            _btnReinstall.Enabled = true;
-            StyleCommandButton(_btnReinstall, ButtonKind.Primary);
+            _btnReinstall.Enabled = updateAvailable;
+            StyleCommandButton(_btnReinstall, updateAvailable ? ButtonKind.Primary : ButtonKind.Disabled);
+            _toolTip.SetToolTip(_btnReinstall, GetUpdateButtonToolTip(installedVersion, updateAvailable));
 
             _btnUninstall.Enabled = true;
             StyleCommandButton(_btnUninstall, ButtonKind.Danger);
@@ -213,11 +219,39 @@ public partial class MainForm : Form
 
             _btnReinstall.Enabled = false;
             StyleCommandButton(_btnReinstall, ButtonKind.Disabled);
+            _toolTip.SetToolTip(_btnReinstall, "Cài đặt bản Việt hóa trước khi cập nhật");
 
             _btnUninstall.Enabled = false;
             StyleCommandButton(_btnUninstall, ButtonKind.Disabled);
             _btnLaunchGame.Enabled = true;
         }
+    }
+
+    private bool IsUpdateAvailable(string installedVersion) =>
+        !string.IsNullOrWhiteSpace(_latestReleaseVersion)
+        && !string.Equals(
+            NormalizeVersion(installedVersion),
+            NormalizeVersion(_latestReleaseVersion),
+            StringComparison.OrdinalIgnoreCase);
+
+    private string GetUpdateButtonToolTip(string installedVersion, bool updateAvailable)
+    {
+        if (string.IsNullOrWhiteSpace(_latestReleaseVersion))
+            return "Chưa thể kiểm tra bản cập nhật từ GitHub";
+
+        return updateAvailable
+            ? $"Cập nhật từ {installedVersion} lên {_latestReleaseVersion}"
+            : "Bạn đang sử dụng phiên bản mới nhất";
+    }
+
+    private static string NormalizeVersion(string version)
+    {
+        var normalized = version.Trim();
+        if (normalized.StartsWith("v.", StringComparison.OrdinalIgnoreCase))
+            return normalized[2..];
+        if (normalized.StartsWith('v') || normalized.StartsWith('V'))
+            return normalized[1..];
+        return normalized;
     }
 
     private async void BtnInstall_Click(object? sender, EventArgs e) => await RunInstall(false);
@@ -253,7 +287,9 @@ public partial class MainForm : Form
                 return;
             }
 
-            _lblLatestVersion.Text = release.Value.version;
+            _latestReleaseVersion = release.Value.version;
+            _latestVersion = release.Value.version;
+            _lblLatestVersion.Text = _latestVersion;
             Log($"Phiên bản mới nhất: {release.Value.version}");
 
             // Dùng tên file thật từ GitHub thay vì hardcode
