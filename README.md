@@ -25,6 +25,7 @@ Bản Việt hóa được phát triển bởi **Vietnam Key FanClub** và phát
 - Chỉ bật nút **Cập nhật** khi có phiên bản mới.
 - Tải và cài đặt bản Việt hóa trực tiếp trong ứng dụng.
 - Hiển thị tiến trình và trạng thái trong suốt quá trình cài đặt.
+- Cho phép tạm thời tắt hoặc bật lại bản Việt hóa khi cần.
 - Hỗ trợ cài đặt, cập nhật, gỡ cài đặt và khởi chạy game.
 
 ## Yêu cầu

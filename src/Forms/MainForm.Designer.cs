@@ -45,7 +45,7 @@ partial class MainForm
     private Panel _pnlOptions;
     private Label _lblOptionsTitle;
     private Button _btnLaunchGame;
-    private Button _btnTos;
+    private Button _btnTogglePatch;
 
     // Progress
     private Label _lblProgressStatusTitle;
@@ -96,7 +96,7 @@ partial class MainForm
         _pnlOptions = new Panel();
         _lblOptionsTitle = new Label();
         _btnLaunchGame = new Button();
-        _btnTos = new Button();
+        _btnTogglePatch = new Button();
         _lblProgressStatusTitle = new Label();
         _lblProgressStatus = new Label();
         _progressBar = new CustomProgressBar();
@@ -471,7 +471,7 @@ partial class MainForm
         _pnlOptions.BackColor = Color.FromArgb(55, 49, 66);
         _pnlOptions.Controls.Add(_lblOptionsTitle);
         _pnlOptions.Controls.Add(_btnLaunchGame);
-        _pnlOptions.Controls.Add(_btnTos);
+        _pnlOptions.Controls.Add(_btnTogglePatch);
         _pnlOptions.Location = new Point(343, 253);
         _pnlOptions.Name = "_pnlOptions";
         _pnlOptions.Size = new Size(312, 150);
@@ -508,26 +508,27 @@ partial class MainForm
         _btnLaunchGame.TextAlign = ContentAlignment.MiddleLeft;
         _btnLaunchGame.UseVisualStyleBackColor = false;
         _btnLaunchGame.Click += BtnLaunchGame_Click;
-        // 
-        // _btnTos
-        // 
-        _btnTos.BackColor = Color.FromArgb(68, 57, 82);
-        _btnTos.Cursor = Cursors.Hand;
-        _btnTos.FlatAppearance.BorderColor = Color.FromArgb(178, 158, 190);
-        _btnTos.FlatAppearance.MouseDownBackColor = Color.FromArgb(48, 39, 59);
-        _btnTos.FlatAppearance.MouseOverBackColor = Color.FromArgb(84, 68, 99);
-        _btnTos.FlatStyle = FlatStyle.Flat;
-        _btnTos.Font = new Font("Bahnschrift", 9.75F);
-        _btnTos.ForeColor = Color.FromArgb(250, 245, 252);
-        _btnTos.Location = new Point(10, 68);
-        _btnTos.Name = "_btnTos";
-        _btnTos.Padding = new Padding(6, 0, 0, 0);
-        _btnTos.Size = new Size(290, 32);
-        _btnTos.TabIndex = 3;
-        _btnTos.Text = "Điều khoản sử dụng";
-        _btnTos.TextAlign = ContentAlignment.MiddleLeft;
-        _btnTos.UseVisualStyleBackColor = false;
-        _btnTos.Click += BtnTos_Click;
+        //
+        // _btnTogglePatch
+        //
+        _btnTogglePatch.BackColor = Color.FromArgb(68, 57, 82);
+        _btnTogglePatch.Cursor = Cursors.Hand;
+        _btnTogglePatch.Enabled = false;
+        _btnTogglePatch.FlatAppearance.BorderColor = Color.FromArgb(178, 158, 190);
+        _btnTogglePatch.FlatAppearance.MouseDownBackColor = Color.FromArgb(48, 39, 59);
+        _btnTogglePatch.FlatAppearance.MouseOverBackColor = Color.FromArgb(84, 68, 99);
+        _btnTogglePatch.FlatStyle = FlatStyle.Flat;
+        _btnTogglePatch.Font = new Font("Bahnschrift", 9.75F);
+        _btnTogglePatch.ForeColor = Color.FromArgb(250, 245, 252);
+        _btnTogglePatch.Location = new Point(10, 68);
+        _btnTogglePatch.Name = "_btnTogglePatch";
+        _btnTogglePatch.Padding = new Padding(6, 0, 0, 0);
+        _btnTogglePatch.Size = new Size(290, 32);
+        _btnTogglePatch.TabIndex = 3;
+        _btnTogglePatch.Text = "Tắt bản vá";
+        _btnTogglePatch.TextAlign = ContentAlignment.MiddleLeft;
+        _btnTogglePatch.UseVisualStyleBackColor = false;
+        _btnTogglePatch.Click += BtnTogglePatch_Click;
         // 
         // _lblProgressStatusTitle
         // 

@@ -24,6 +24,9 @@ public partial class MainForm : Form
     private readonly Panel _gamePathPill = new();
     private string _latestVersion = "—";
     private string? _latestReleaseVersion;
+    private bool _isLaunchingGame;
+    private int _launchLogStart = -1;
+    private int _launchLogLength;
 
     public MainForm()
     {
@@ -166,6 +169,9 @@ public partial class MainForm : Form
             _btnReinstall.Enabled = false;
             _btnUninstall.Enabled = false;
             _btnLaunchGame.Enabled = false;
+            _btnTogglePatch.Text = "Tắt bản vá";
+            _btnTogglePatch.Enabled = false;
+            StyleCommandButton(_btnTogglePatch, ButtonKind.Disabled);
             return;
         }
 
@@ -177,21 +183,72 @@ public partial class MainForm : Form
         _toolTip.SetToolTip(_lblGamePathValue, path);
         _toolTip.SetToolTip(_txtGamePath, path);
         _lblGameVersionValue.Text = GameDetector.GetGameVersion(path) ?? "—";
-        _lblBepInExValue.Text = Directory.Exists(Path.Combine(path, "BepInEx"))
-            ? "Đã cài đặt ✔" : "Chưa cài đặt";
-        _lblBepInExValue.ForeColor = Directory.Exists(Path.Combine(path, "BepInEx"))
-            ? VsAccentHover : VsWarning;
+        var patchEnabled = _patchManager.IsPatchEnabled(path);
+        var patchDisabled = _patchManager.IsPatchDisabled(path);
+        var patchDirectoryConflict = patchEnabled && patchDisabled;
+        var canTogglePatch = patchEnabled ^ patchDisabled;
+
+        if (patchDirectoryConflict)
+        {
+            _lblBepInExValue.Text = "Xung đột thư mục";
+            _lblBepInExValue.ForeColor = VsDanger;
+        }
+        else if (patchEnabled)
+        {
+            _lblBepInExValue.Text = "Đã cài đặt ✔";
+            _lblBepInExValue.ForeColor = VsAccentHover;
+        }
+        else if (patchDisabled)
+        {
+            _lblBepInExValue.Text = "Đã tắt";
+            _lblBepInExValue.ForeColor = VsWarning;
+        }
+        else
+        {
+            _lblBepInExValue.Text = "Chưa cài đặt";
+            _lblBepInExValue.ForeColor = VsWarning;
+        }
+
+        _btnTogglePatch.Text = patchDisabled && !patchEnabled ? "Bật bản vá" : "Tắt bản vá";
+        _btnTogglePatch.Enabled = canTogglePatch;
+        StyleCommandButton(_btnTogglePatch, canTogglePatch ? ButtonKind.Secondary : ButtonKind.Disabled);
+        _toolTip.SetToolTip(
+            _btnTogglePatch,
+            patchDirectoryConflict
+                ? "Không thể bật hoặc tắt vì cả BepInEx và BepInEx_ đều tồn tại"
+                : patchDisabled
+                    ? "Đổi tên BepInEx_ thành BepInEx để bật bản vá"
+                    : patchEnabled
+                        ? "Đổi tên BepInEx thành BepInEx_ để tắt bản vá"
+                        : "Chỉ khả dụng sau khi BepInEx được cài đặt");
 
         if (_patchManager.IsInstalled(path))
         {
             var installedVersion = _patchManager.GetInstalledVersion(path);
-            var updateAvailable = IsUpdateAvailable(installedVersion);
+            var updateAvailable = patchEnabled
+                && !patchDirectoryConflict
+                && IsUpdateAvailable(installedVersion);
             _lblInstalledVersion.Text = installedVersion;
             _lblLatestVersion.Text = _latestVersion;
-            _lblPatchStatus.Text = "Đã cài đặt ✔";
-            _lblPatchStatus.ForeColor = VsAccentHover;
-            UpdateProgressStatus("Bản Việt hóa đã sẵn sàng", VsSubtleText);
-            _lblBepInExValue.ForeColor = VsAccentHover;
+
+            if (patchDirectoryConflict)
+            {
+                _lblPatchStatus.Text = "Xung đột thư mục";
+                _lblPatchStatus.ForeColor = VsDanger;
+                UpdateProgressStatus("Hãy xử lý thư mục BepInEx bị trùng", VsDanger);
+            }
+            else if (patchDisabled)
+            {
+                _lblPatchStatus.Text = "Đã tắt";
+                _lblPatchStatus.ForeColor = VsWarning;
+                UpdateProgressStatus("Bản Việt hóa đang tắt", VsWarning);
+            }
+            else
+            {
+                _lblPatchStatus.Text = "Đã cài đặt ✔";
+                _lblPatchStatus.ForeColor = VsAccentHover;
+                UpdateProgressStatus("Bản Việt hóa đã sẵn sàng", VsSubtleText);
+            }
 
             _btnInstall.Text = "Cài đặt";
             _btnInstall.Enabled = false;
@@ -199,11 +256,17 @@ public partial class MainForm : Form
 
             _btnReinstall.Enabled = updateAvailable;
             StyleCommandButton(_btnReinstall, updateAvailable ? ButtonKind.Primary : ButtonKind.Disabled);
-            _toolTip.SetToolTip(_btnReinstall, GetUpdateButtonToolTip(installedVersion, updateAvailable));
+            _toolTip.SetToolTip(
+                _btnReinstall,
+                patchDirectoryConflict
+                    ? "Hãy xử lý xung đột thư mục trước khi cập nhật"
+                    : patchDisabled
+                        ? "Hãy bật bản vá trước khi cập nhật"
+                        : GetUpdateButtonToolTip(installedVersion, updateAvailable));
 
             _btnUninstall.Enabled = true;
             StyleCommandButton(_btnUninstall, ButtonKind.Danger);
-            _btnLaunchGame.Enabled = true;
+            _btnLaunchGame.Enabled = !_isLaunchingGame;
         }
         else
         {
@@ -214,8 +277,9 @@ public partial class MainForm : Form
             UpdateProgressStatus("Sẵn sàng cài đặt", VsSubtleText);
 
             _btnInstall.Text = "Cài đặt";
-            _btnInstall.Enabled = true;
-            StyleCommandButton(_btnInstall, ButtonKind.Primary);
+            var canInstall = !patchDisabled && !patchDirectoryConflict;
+            _btnInstall.Enabled = canInstall;
+            StyleCommandButton(_btnInstall, canInstall ? ButtonKind.Primary : ButtonKind.Disabled);
 
             _btnReinstall.Enabled = false;
             StyleCommandButton(_btnReinstall, ButtonKind.Disabled);
@@ -223,7 +287,7 @@ public partial class MainForm : Form
 
             _btnUninstall.Enabled = false;
             StyleCommandButton(_btnUninstall, ButtonKind.Disabled);
-            _btnLaunchGame.Enabled = true;
+            _btnLaunchGame.Enabled = !_isLaunchingGame;
         }
     }
 
@@ -365,22 +429,102 @@ public partial class MainForm : Form
             UpdateProgressStatus("Gỡ cài đặt hoàn tất", VsSuccess);
             //Log("✔ Gỡ cài đặt thành công!");
         }
-        catch (Exception ex) { Log($"✘ Lỗi: {ex.Message}"); UpdateProgressStatus("Gỡ cài đặt thất bại", VsDanger); }
+        catch (Exception ex) { Log($"Lỗi: {ex.Message}"); UpdateProgressStatus("Gỡ cài đặt thất bại", VsDanger); }
         finally { SetBusyState(false); RefreshStatus(); }
     }
 
-    private void BtnLaunchGame_Click(object? sender, EventArgs e)
+    private async void BtnLaunchGame_Click(object? sender, EventArgs e)
     {
         var exe = Path.Combine(_txtGamePath.Text.Trim(), "HeavenBurnsRed.exe");
-        if (!File.Exists(exe)) { Log("✘ Không tìm thấy HeavenBurnsRed.exe"); return; }
-        Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
-        Log("Đang khởi động game...");
+        if (!File.Exists(exe)) { Log("Lỗi: Không tìm thấy HeavenBurnsRed.exe"); return; }
+
+        if (_isLaunchingGame)
+            return;
+
+        const string gameProcessName = "HeavenBurnsRed";
+        if (IsGameMainWindowOpen(gameProcessName))
+        {
+            Log("Đã khởi động game.");
+            return;
+        }
+
+        _isLaunchingGame = true;
+        _btnLaunchGame.Enabled = false;
+        var stopwatch = Stopwatch.StartNew();
+        BeginLaunchLog($"Đang khởi động game... {FormatElapsed(stopwatch.Elapsed)}");
+
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true })
+                ?? throw new InvalidOperationException("Windows không thể tạo tiến trình game.");
+
+            var timeout = TimeSpan.FromMinutes(5);
+            while (stopwatch.Elapsed < timeout)
+            {
+                if (IsGameMainWindowOpen(gameProcessName))
+                {
+                    CompleteLaunchLog($"Đã khởi động game sau {FormatElapsed(stopwatch.Elapsed)}.");
+                    return;
+                }
+
+                await Task.Delay(1000);
+                UpdateLaunchLog($"Đang khởi động game... {FormatElapsed(stopwatch.Elapsed)}");
+            }
+
+            CompleteLaunchLog($"Game chưa mở cửa sổ chính sau {FormatElapsed(stopwatch.Elapsed)}.");
+        }
+        catch (Exception ex)
+        {
+            CompleteLaunchLog($"Không thể khởi động game: {ex.Message}");
+        }
+        finally
+        {
+            _isLaunchingGame = false;
+            _btnLaunchGame.Enabled = GameDetector.ValidateGamePath(_txtGamePath.Text.Trim());
+        }
     }
 
-    private void BtnTos_Click(object? sender, EventArgs e)
+    private void BtnTogglePatch_Click(object? sender, EventArgs e)
     {
-        using var form = new TosForm();
-        form.ShowDialog(this);
+        var gamePath = _txtGamePath.Text.Trim();
+        var patchEnabled = _patchManager.IsPatchEnabled(gamePath);
+        var patchDisabled = _patchManager.IsPatchDisabled(gamePath);
+
+        if (patchEnabled == patchDisabled)
+        {
+            MessageBox.Show(
+                patchEnabled
+                    ? "Không thể bật hoặc tắt bản vá vì cả hai thư mục BepInEx và BepInEx_ đều tồn tại."
+                    : "Không tìm thấy BepInEx để bật hoặc tắt bản vá.",
+                "Không thể thay đổi trạng thái bản vá",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            RefreshStatus();
+            return;
+        }
+
+        var enablePatch = patchDisabled;
+        SetBusyState(true);
+        try
+        {
+            _patchManager.SetPatchEnabled(gamePath, enablePatch);
+            var message = enablePatch ? "Đã bật bản vá." : "Đã tắt bản vá.";
+            Log(message);
+        }
+        catch (Exception ex)
+        {
+            Log($"✘ Không thể {(enablePatch ? "bật" : "tắt")} bản vá: {ex.Message}");
+            MessageBox.Show(
+                $"Không thể {(enablePatch ? "bật" : "tắt")} bản vá:\n{ex.Message}",
+                "Lỗi",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetBusyState(false);
+            RefreshStatus();
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────
@@ -447,7 +591,7 @@ public partial class MainForm : Form
         StyleCommandButton(_btnReinstall, ButtonKind.Secondary);
         StyleCommandButton(_btnUninstall, ButtonKind.Danger);
         StyleCommandButton(_btnLaunchGame, ButtonKind.Success);
-        StyleCommandButton(_btnTos, ButtonKind.Secondary);
+        StyleCommandButton(_btnTogglePatch, ButtonKind.Disabled);
         _gamePathPill.BackColor = VsPanelAlt;
         _gamePathPill.Invalidate();
     }
@@ -721,9 +865,63 @@ public partial class MainForm : Form
         _btnUninstall.Enabled = !isBusy;
         _btnBrowse.Enabled = !isBusy;
         _txtGamePath.Enabled = !isBusy;
-        _btnLaunchGame.Enabled = !isBusy;
-        _btnTos.Enabled = !isBusy;
+        _btnLaunchGame.Enabled = !isBusy && !_isLaunchingGame;
+        _btnTogglePatch.Enabled = !isBusy;
     }
+
+    private static bool IsGameMainWindowOpen(string processName)
+    {
+        foreach (var process in Process.GetProcessesByName(processName))
+        {
+            using (process)
+            {
+                try
+                {
+                    process.Refresh();
+                    if (!process.HasExited && process.MainWindowHandle != IntPtr.Zero)
+                        return true;
+                }
+                catch
+                {
+                    // Tiến trình có thể thoát trong lúc đang kiểm tra.
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed) =>
+        elapsed.ToString(@"mm\:ss");
+
+    private void BeginLaunchLog(string message)
+    {
+        _launchLogStart = _rtbLog.TextLength;
+        _launchLogLength = 0;
+        UpdateLaunchLog(message);
+    }
+
+    private void UpdateLaunchLog(string message)
+    {
+        if (_launchLogStart < 0)
+            return;
+
+        var line = $"[{DateTime.Now:HH:mm:ss}] {message}\n";
+        _rtbLog.Select(_launchLogStart, _launchLogLength);
+        _rtbLog.SelectedText = line;
+        _launchLogLength = line.Length;
+        _rtbLog.SelectionStart = _rtbLog.TextLength;
+        _rtbLog.SelectionLength = 0;
+        _rtbLog.ScrollToCaret();
+    }
+
+    private void CompleteLaunchLog(string message)
+    {
+        UpdateLaunchLog(message);
+        _launchLogStart = -1;
+        _launchLogLength = 0;
+    }
+
     private void Log(string message)
     {
         if (InvokeRequired) { Invoke(() => Log(message)); return; }

@@ -3,51 +3,93 @@ using Newtonsoft.Json;
 
 public class PatchManager
 {
+    private const string ActiveBepInExDirectory = "BepInEx";
+    private const string DisabledBepInExDirectory = "BepInEx_";
     private const string ManifestFile = "hbr-vn_manifest.json";
     private const string LegacyManifestFile = "hbr-vn_manifest.txt";
 
+    private static readonly string[] BepInExDirectories =
+    {
+        ActiveBepInExDirectory,
+        DisabledBepInExDirectory
+    };
+
+    public bool IsPatchEnabled(string gamePath) =>
+        Directory.Exists(GetBepInExPath(gamePath, ActiveBepInExDirectory));
+
+    public bool IsPatchDisabled(string gamePath) =>
+        Directory.Exists(GetBepInExPath(gamePath, DisabledBepInExDirectory));
+
+    public void SetPatchEnabled(string gamePath, bool enabled)
+    {
+        var sourceDirectory = enabled ? DisabledBepInExDirectory : ActiveBepInExDirectory;
+        var destinationDirectory = enabled ? ActiveBepInExDirectory : DisabledBepInExDirectory;
+        var sourcePath = GetBepInExPath(gamePath, sourceDirectory);
+        var destinationPath = GetBepInExPath(gamePath, destinationDirectory);
+
+        if (!Directory.Exists(sourcePath))
+            throw new DirectoryNotFoundException($"Không tìm thấy thư mục {sourceDirectory}.");
+
+        if (Directory.Exists(destinationPath))
+            throw new IOException($"Không thể đổi tên vì thư mục {destinationDirectory} đã tồn tại.");
+
+        Directory.Move(sourcePath, destinationPath);
+    }
+
     public bool IsInstalled(string gamePath)
     {
-        if (File.Exists(GetManifestPath(gamePath)) || File.Exists(GetLegacyJsonManifestPath(gamePath)))
-            return true;
+        foreach (var bepInExDirectory in BepInExDirectories)
+        {
+            if (File.Exists(GetManifestPath(gamePath, bepInExDirectory))
+                || File.Exists(GetLegacyJsonManifestPath(gamePath, bepInExDirectory)))
+                return true;
 
-        var pluginsPath = Path.Combine(gamePath, "BepInEx", "plugins", "HBR-VN");
-        return File.Exists(Path.Combine(pluginsPath, "HBRTLFixUp.dll"));
+            var pluginsPath = Path.Combine(gamePath, bepInExDirectory, "plugins", "HBR-VN");
+            if (File.Exists(Path.Combine(pluginsPath, "HBRTLFixUp.dll")))
+                return true;
+        }
+
+        return false;
     }
 
     public string GetInstalledVersion(string gamePath)
     {
-        var manifestPath = GetManifestPath(gamePath);
-        if (File.Exists(manifestPath))
+        foreach (var bepInExDirectory in BepInExDirectories)
         {
-            try
+            var manifestPath = GetManifestPath(gamePath, bepInExDirectory);
+            if (File.Exists(manifestPath))
             {
-                var manifest = JsonConvert.DeserializeObject<PatchManifest>(File.ReadAllText(manifestPath));
-                return string.IsNullOrWhiteSpace(manifest?.Version) ? "Không rõ" : manifest.Version;
+                try
+                {
+                    var manifest = JsonConvert.DeserializeObject<PatchManifest>(File.ReadAllText(manifestPath));
+                    return string.IsNullOrWhiteSpace(manifest?.Version) ? "Không rõ" : manifest.Version;
+                }
+                catch
+                {
+                    return "Không rõ";
+                }
             }
-            catch
+
+            var legacyJsonManifestPath = GetLegacyJsonManifestPath(gamePath, bepInExDirectory);
+            if (File.Exists(legacyJsonManifestPath))
             {
-                return "Không rõ";
+                try
+                {
+                    var manifest = JsonConvert.DeserializeObject<PatchManifest>(File.ReadAllText(legacyJsonManifestPath));
+                    return string.IsNullOrWhiteSpace(manifest?.Version) ? "Không rõ" : manifest.Version;
+                }
+                catch
+                {
+                    return "Không rõ";
+                }
             }
+
+            var legacyManifestPath = GetLegacyManifestPath(gamePath, bepInExDirectory);
+            if (File.Exists(legacyManifestPath))
+                return File.ReadLines(legacyManifestPath).FirstOrDefault() ?? "Không rõ";
         }
 
-        var legacyJsonManifestPath = GetLegacyJsonManifestPath(gamePath);
-        if (File.Exists(legacyJsonManifestPath))
-        {
-            try
-            {
-                var manifest = JsonConvert.DeserializeObject<PatchManifest>(File.ReadAllText(legacyJsonManifestPath));
-                return string.IsNullOrWhiteSpace(manifest?.Version) ? "Không rõ" : manifest.Version;
-            }
-            catch
-            {
-                return "Không rõ";
-            }
-        }
-
-        var legacyManifestPath = GetLegacyManifestPath(gamePath);
-        if (!File.Exists(legacyManifestPath)) return "Không rõ";
-        return File.ReadLines(legacyManifestPath).FirstOrDefault() ?? "Không rõ";
+        return "Không rõ";
     }
 
     public async Task InstallAsync(string zipPath, string gamePath,
@@ -129,14 +171,23 @@ public class PatchManager
         progress?.Report(100);
     }
 
-    private static string GetManifestPath(string gamePath) =>
-        Path.Combine(gamePath, "BepInEx", "plugins", "HBR-VN", ManifestFile);
+    private static string GetBepInExPath(string gamePath, string bepInExDirectory) =>
+        Path.Combine(gamePath, bepInExDirectory);
 
-    private static string GetLegacyJsonManifestPath(string gamePath) =>
-        Path.Combine(gamePath, "BepInEx", "Translation", ManifestFile);
+    private static string GetManifestPath(
+        string gamePath,
+        string bepInExDirectory = ActiveBepInExDirectory) =>
+        Path.Combine(gamePath, bepInExDirectory, "plugins", "HBR-VN", ManifestFile);
 
-    private static string GetLegacyManifestPath(string gamePath) =>
-        Path.Combine(gamePath, "BepInEx", "Translation", LegacyManifestFile);
+    private static string GetLegacyJsonManifestPath(
+        string gamePath,
+        string bepInExDirectory = ActiveBepInExDirectory) =>
+        Path.Combine(gamePath, bepInExDirectory, "Translation", ManifestFile);
+
+    private static string GetLegacyManifestPath(
+        string gamePath,
+        string bepInExDirectory = ActiveBepInExDirectory) =>
+        Path.Combine(gamePath, bepInExDirectory, "Translation", LegacyManifestFile);
 
     private static void RollBackChangedFiles(
         IReadOnlyDictionary<string, string> overwrittenBackups,
@@ -175,7 +226,8 @@ public class PatchManager
 
         var foldersToDelete = new[]
         {
-        "BepInEx",
+        ActiveBepInExDirectory,
+        DisabledBepInExDirectory,
         "dotnet",
     };
         await Task.Run(() =>
@@ -202,7 +254,12 @@ public class PatchManager
         });
 
         // Xóa manifest nếu có, kể cả định dạng txt cũ.
-        foreach (var manifestPath in new[] { GetManifestPath(gamePath), GetLegacyJsonManifestPath(gamePath), GetLegacyManifestPath(gamePath) })
+        foreach (var manifestPath in BepInExDirectories.SelectMany(bepInExDirectory => new[]
+        {
+            GetManifestPath(gamePath, bepInExDirectory),
+            GetLegacyJsonManifestPath(gamePath, bepInExDirectory),
+            GetLegacyManifestPath(gamePath, bepInExDirectory)
+        }))
         {
             if (File.Exists(manifestPath))
                 File.Delete(manifestPath);
