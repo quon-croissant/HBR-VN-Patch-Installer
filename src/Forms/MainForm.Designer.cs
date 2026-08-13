@@ -46,6 +46,7 @@ partial class MainForm
     private Label _lblOptionsTitle;
     private Button _btnLaunchGame;
     private Button _btnTogglePatch;
+    private Button _btnSpecialOptions;
 
     // Progress
     private Label _lblProgressStatusTitle;
@@ -97,6 +98,7 @@ partial class MainForm
         _lblOptionsTitle = new Label();
         _btnLaunchGame = new Button();
         _btnTogglePatch = new Button();
+        _btnSpecialOptions = new Button();
         _lblProgressStatusTitle = new Label();
         _lblProgressStatus = new Label();
         _progressBar = new CustomProgressBar();
@@ -472,6 +474,7 @@ partial class MainForm
         _pnlOptions.Controls.Add(_lblOptionsTitle);
         _pnlOptions.Controls.Add(_btnLaunchGame);
         _pnlOptions.Controls.Add(_btnTogglePatch);
+        _pnlOptions.Controls.Add(_btnSpecialOptions);
         _pnlOptions.Location = new Point(343, 253);
         _pnlOptions.Name = "_pnlOptions";
         _pnlOptions.Size = new Size(312, 150);
@@ -529,6 +532,27 @@ partial class MainForm
         _btnTogglePatch.TextAlign = ContentAlignment.MiddleLeft;
         _btnTogglePatch.UseVisualStyleBackColor = false;
         _btnTogglePatch.Click += BtnTogglePatch_Click;
+        //
+        // _btnSpecialOptions
+        //
+        _btnSpecialOptions.BackColor = Color.FromArgb(68, 57, 82);
+        _btnSpecialOptions.Cursor = Cursors.Hand;
+        _btnSpecialOptions.Enabled = false;
+        _btnSpecialOptions.FlatAppearance.BorderColor = Color.FromArgb(178, 158, 190);
+        _btnSpecialOptions.FlatAppearance.MouseDownBackColor = Color.FromArgb(48, 39, 59);
+        _btnSpecialOptions.FlatAppearance.MouseOverBackColor = Color.FromArgb(84, 68, 99);
+        _btnSpecialOptions.FlatStyle = FlatStyle.Flat;
+        _btnSpecialOptions.Font = new Font("Bahnschrift", 9.75F);
+        _btnSpecialOptions.ForeColor = Color.FromArgb(250, 245, 252);
+        _btnSpecialOptions.Location = new Point(10, 106);
+        _btnSpecialOptions.Name = "_btnSpecialOptions";
+        _btnSpecialOptions.Padding = new Padding(6, 0, 0, 0);
+        _btnSpecialOptions.Size = new Size(290, 32);
+        _btnSpecialOptions.TabIndex = 4;
+        _btnSpecialOptions.Text = "Tuỳ chỉnh đặc biệt";
+        _btnSpecialOptions.TextAlign = ContentAlignment.MiddleLeft;
+        _btnSpecialOptions.UseVisualStyleBackColor = false;
+        _btnSpecialOptions.Click += BtnSpecialOptions_Click;
         // 
         // _lblProgressStatusTitle
         // 
