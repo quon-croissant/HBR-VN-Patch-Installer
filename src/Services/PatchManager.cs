@@ -36,104 +36,6 @@ public class PatchManager
         Directory.Move(sourcePath, destinationPath);
     }
 
-    public bool GetBorderlessWindowEnabled(string gamePath)
-    {
-        var configPath = GetGraphicsConfigPath(gamePath);
-        if (!File.Exists(configPath))
-            return true;
-
-        foreach (var line in File.ReadLines(configPath))
-        {
-            var parts = line.Split('=', 2, StringSplitOptions.TrimEntries);
-            if (parts.Length == 2
-                && parts[0].Equals("EnableBorderlessWindow", StringComparison.OrdinalIgnoreCase)
-                && bool.TryParse(parts[1], out var enabled))
-                return enabled;
-        }
-
-        return true;
-    }
-
-    public (int Width, int Height) GetBorderlessResolution(string gamePath)
-    {
-        var configPath = GetGraphicsConfigPath(gamePath);
-        if (!File.Exists(configPath))
-            return (0, 0);
-
-        var values = File.ReadLines(configPath)
-            .Select(line => line.Split('=', 2, StringSplitOptions.TrimEntries))
-            .Where(parts => parts.Length == 2)
-            .ToDictionary(parts => parts[0], parts => parts[1], StringComparer.OrdinalIgnoreCase);
-        return (
-            values.TryGetValue("ResolutionWidth", out var width) && int.TryParse(width, out var parsedWidth) ? parsedWidth : 0,
-            values.TryGetValue("ResolutionHeight", out var height) && int.TryParse(height, out var parsedHeight) ? parsedHeight : 0);
-    }
-
-    public void SetBorderlessSettings(string gamePath, bool enabled, int width, int height)
-    {
-        var configPath = GetGraphicsConfigPath(gamePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-        var lines = File.Exists(configPath) ? File.ReadAllLines(configPath).ToList() : new List<string>();
-        if (!lines.Any(line => line.Trim().Equals("[Graphics]", StringComparison.OrdinalIgnoreCase)))
-            lines.AddRange(new[] { "", "[Graphics]" });
-
-        SetValue("EnableBorderlessWindow", enabled.ToString().ToLowerInvariant());
-        SetValue("ResolutionWidth", width.ToString());
-        SetValue("ResolutionHeight", height.ToString());
-
-        File.WriteAllLines(configPath, lines);
-
-        void SetValue(string key, string value)
-        {
-            var index = lines.FindIndex(line =>
-                line.Split('=', 2, StringSplitOptions.TrimEntries)[0].Equals(key, StringComparison.OrdinalIgnoreCase));
-            if (index >= 0)
-                lines[index] = $"{key} = {value}";
-            else
-                lines.Add($"{key} = {value}");
-        }
-    }
-
-    public bool GetArchivedCollaborationEventsEnabled(string gamePath)
-    {
-        var configPath = GetMainPluginConfigPath(gamePath);
-        if (!File.Exists(configPath))
-            return false;
-
-        foreach (var line in File.ReadLines(configPath))
-        {
-            var parts = line.Split('=', 2, StringSplitOptions.TrimEntries);
-            if (parts.Length == 2
-                && parts[0].Equals("EnableArchivedCollaborationEvents", StringComparison.OrdinalIgnoreCase)
-                && bool.TryParse(parts[1], out var enabled))
-                return enabled;
-        }
-
-        return false;
-    }
-
-    public void SetArchivedCollaborationEventsEnabled(string gamePath, bool enabled)
-    {
-        var configPath = GetMainPluginConfigPath(gamePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-        var lines = File.Exists(configPath) ? File.ReadAllLines(configPath).ToList() : new List<string>();
-        const string key = "EnableArchivedCollaborationEvents";
-        var index = lines.FindIndex(line =>
-            line.Split('=', 2, StringSplitOptions.TrimEntries)[0].Equals(key, StringComparison.OrdinalIgnoreCase));
-
-        if (index >= 0)
-            lines[index] = $"{key}={enabled}";
-        else
-        {
-            lines.Add("");
-            lines.Add("# TÍNH NĂNG THỬ NGHIỆM: hiện lại event Collaboration đã kết thúc.");
-            lines.Add("# Chỉ hỗ trợ cốt truyện; nhiệm vụ, cửa hàng và Prism Event bị vô hiệu hóa.");
-            lines.Add($"{key}={enabled}");
-        }
-
-        File.WriteAllLines(configPath, lines);
-    }
-
     public bool IsInstalled(string gamePath)
     {
         foreach (var bepInExDirectory in BepInExDirectories)
@@ -271,26 +173,6 @@ public class PatchManager
 
     private static string GetBepInExPath(string gamePath, string bepInExDirectory) =>
         Path.Combine(gamePath, bepInExDirectory);
-
-    private static string GetGraphicsConfigPath(string gamePath)
-    {
-        var bepInExDirectory = Directory.Exists(GetBepInExPath(gamePath, ActiveBepInExDirectory))
-            ? ActiveBepInExDirectory
-            : Directory.Exists(GetBepInExPath(gamePath, DisabledBepInExDirectory))
-                ? DisabledBepInExDirectory
-                : throw new DirectoryNotFoundException("Không tìm thấy BepInEx để lưu tuỳ chỉnh.");
-        return Path.Combine(gamePath, bepInExDirectory, "config", "com.hbrvipatch.graphics.cfg");
-    }
-
-    private static string GetMainPluginConfigPath(string gamePath)
-    {
-        var bepInExDirectory = Directory.Exists(GetBepInExPath(gamePath, ActiveBepInExDirectory))
-            ? ActiveBepInExDirectory
-            : Directory.Exists(GetBepInExPath(gamePath, DisabledBepInExDirectory))
-                ? DisabledBepInExDirectory
-                : throw new DirectoryNotFoundException("Không tìm thấy BepInEx để lưu tuỳ chỉnh.");
-        return Path.Combine(gamePath, bepInExDirectory, "config", "HBRTLFixUp.cfg");
-    }
 
     private static string GetManifestPath(
         string gamePath,

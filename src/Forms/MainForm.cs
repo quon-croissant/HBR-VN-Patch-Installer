@@ -172,8 +172,6 @@ public partial class MainForm : Form
             _btnTogglePatch.Text = "Tắt bản vá";
             _btnTogglePatch.Enabled = false;
             StyleCommandButton(_btnTogglePatch, ButtonKind.Disabled);
-            _btnSpecialOptions.Enabled = false;
-            StyleCommandButton(_btnSpecialOptions, ButtonKind.Disabled);
             return;
         }
 
@@ -214,8 +212,6 @@ public partial class MainForm : Form
         _btnTogglePatch.Text = patchDisabled && !patchEnabled ? "Bật bản vá" : "Tắt bản vá";
         _btnTogglePatch.Enabled = canTogglePatch;
         StyleCommandButton(_btnTogglePatch, canTogglePatch ? ButtonKind.Secondary : ButtonKind.Disabled);
-        _btnSpecialOptions.Enabled = canTogglePatch;
-        StyleCommandButton(_btnSpecialOptions, canTogglePatch ? ButtonKind.Secondary : ButtonKind.Disabled);
         _toolTip.SetToolTip(
             _btnTogglePatch,
             patchDirectoryConflict
@@ -531,12 +527,6 @@ public partial class MainForm : Form
         }
     }
 
-    private void BtnSpecialOptions_Click(object? sender, EventArgs e)
-    {
-        using var form = new SpecialOptionsForm(_patchManager, _txtGamePath.Text.Trim());
-        form.ShowDialog(this);
-    }
-
     // ── Helpers ──────────────────────────────────────────────
     private enum ButtonKind
     {
@@ -602,7 +592,6 @@ public partial class MainForm : Form
         StyleCommandButton(_btnUninstall, ButtonKind.Danger);
         StyleCommandButton(_btnLaunchGame, ButtonKind.Success);
         StyleCommandButton(_btnTogglePatch, ButtonKind.Disabled);
-        StyleCommandButton(_btnSpecialOptions, ButtonKind.Disabled);
         _gamePathPill.BackColor = VsPanelAlt;
         _gamePathPill.Invalidate();
     }
@@ -878,7 +867,6 @@ public partial class MainForm : Form
         _txtGamePath.Enabled = !isBusy;
         _btnLaunchGame.Enabled = !isBusy && !_isLaunchingGame;
         _btnTogglePatch.Enabled = !isBusy;
-        _btnSpecialOptions.Enabled = !isBusy;
     }
 
     private static bool IsGameMainWindowOpen(string processName)
