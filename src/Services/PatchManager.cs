@@ -36,104 +36,6 @@ public class PatchManager
         Directory.Move(sourcePath, destinationPath);
     }
 
-    public bool GetBorderlessWindowEnabled(string gamePath)
-    {
-        var configPath = GetGraphicsConfigPath(gamePath);
-        if (!File.Exists(configPath))
-            return true;
-
-        foreach (var line in File.ReadLines(configPath))
-        {
-            var parts = line.Split('=', 2, StringSplitOptions.TrimEntries);
-            if (parts.Length == 2
-                && parts[0].Equals("EnableBorderlessWindow", StringComparison.OrdinalIgnoreCase)
-                && bool.TryParse(parts[1], out var enabled))
-                return enabled;
-        }
-
-        return true;
-    }
-
-    public (int Width, int Height) GetBorderlessResolution(string gamePath)
-    {
-        var configPath = GetGraphicsConfigPath(gamePath);
-        if (!File.Exists(configPath))
-            return (0, 0);
-
-        var values = File.ReadLines(configPath)
-            .Select(line => line.Split('=', 2, StringSplitOptions.TrimEntries))
-            .Where(parts => parts.Length == 2)
-            .ToDictionary(parts => parts[0], parts => parts[1], StringComparer.OrdinalIgnoreCase);
-        return (
-            values.TryGetValue("ResolutionWidth", out var width) && int.TryParse(width, out var parsedWidth) ? parsedWidth : 0,
-            values.TryGetValue("ResolutionHeight", out var height) && int.TryParse(height, out var parsedHeight) ? parsedHeight : 0);
-    }
-
-    public void SetBorderlessSettings(string gamePath, bool enabled, int width, int height)
-    {
-        var configPath = GetGraphicsConfigPath(gamePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-        var lines = File.Exists(configPath) ? File.ReadAllLines(configPath).ToList() : new List<string>();
-        if (!lines.Any(line => line.Trim().Equals("[Graphics]", StringComparison.OrdinalIgnoreCase)))
-            lines.AddRange(new[] { "", "[Graphics]" });
-
-        SetValue("EnableBorderlessWindow", enabled.ToString().ToLowerInvariant());
-        SetValue("ResolutionWidth", width.ToString());
-        SetValue("ResolutionHeight", height.ToString());
-
-        File.WriteAllLines(configPath, lines);
-
-        void SetValue(string key, string value)
-        {
-            var index = lines.FindIndex(line =>
-                line.Split('=', 2, StringSplitOptions.TrimEntries)[0].Equals(key, StringComparison.OrdinalIgnoreCase));
-            if (index >= 0)
-                lines[index] = $"{key} = {value}";
-            else
-                lines.Add($"{key} = {value}");
-        }
-    }
-
-    public bool GetArchivedCollaborationEventsEnabled(string gamePath)
-    {
-        var configPath = GetMainPluginConfigPath(gamePath);
-        if (!File.Exists(configPath))
-            return false;
-
-        foreach (var line in File.ReadLines(configPath))
-        {
-            var parts = line.Split('=', 2, StringSplitOptions.TrimEntries);
-            if (parts.Length == 2
-                && parts[0].Equals("EnableArchivedCollaborationEvents", StringComparison.OrdinalIgnoreCase)
-                && bool.TryParse(parts[1], out var enabled))
-                return enabled;
-        }
-
-        return false;
-    }
-
-    public void SetArchivedCollaborationEventsEnabled(string gamePath, bool enabled)
-    {
-        var configPath = GetMainPluginConfigPath(gamePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-        var lines = File.Exists(configPath) ? File.ReadAllLines(configPath).ToList() : new List<string>();
-        const string key = "EnableArchivedCollaborationEvents";
-        var index = lines.FindIndex(line =>
-            line.Split('=', 2, StringSplitOptions.TrimEntries)[0].Equals(key, StringComparison.OrdinalIgnoreCase));
-
-        if (index >= 0)
-            lines[index] = $"{key}={enabled}";
-        else
-        {
-            lines.Add("");
-            lines.Add("# TÍNH NĂNG THỬ NGHIỆM: hiện lại event Collaboration đã kết thúc.");
-            lines.Add("# Chỉ hỗ trợ cốt truyện; nhiệm vụ, cửa hàng và Prism Event bị vô hiệu hóa.");
-            lines.Add($"{key}={enabled}");
-        }
-
-        File.WriteAllLines(configPath, lines);
-    }
-
     public bool IsInstalled(string gamePath)
     {
         foreach (var bepInExDirectory in BepInExDirectories)
@@ -195,6 +97,7 @@ public class PatchManager
     IProgress<int>? progress = null)
     {
         var installedPaths = new List<string>();
+        var previousFiles = ReadPreviousManifestFiles(gamePath);
         status?.Report("Đang giải nén...");
 
         await Task.Run(() =>
@@ -240,17 +143,50 @@ public class PatchManager
                     if (!wasExisting)
                         newFiles.Add(destPath);
                 }
+
+                // Xóa các file của bản cũ không còn trong gói mới.
+                var newEntrySet = new HashSet<string>(
+                    entries.Select(e => NormalizeRelativePath(e.FullName)),
+                    StringComparer.OrdinalIgnoreCase);
+                foreach (var rel in previousFiles)
+                {
+                    if (newEntrySet.Contains(NormalizeRelativePath(rel)))
+                        continue;
+
+                    var stalePath = Path.GetFullPath(Path.Combine(gamePath, rel));
+                    if (!stalePath.StartsWith(gameRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(stalePath))
+                        continue;
+
+                    if (!overwrittenBackups.ContainsKey(stalePath))
+                    {
+                        Directory.CreateDirectory(backupRoot);
+                        var backupPath = Path.Combine(backupRoot, Guid.NewGuid().ToString("N"));
+                        File.Copy(stalePath, backupPath, overwrite: false);
+                        overwrittenBackups.Add(stalePath, backupPath);
+                    }
+
+                    File.Delete(stalePath);
+                    status?.Report($"Xóa file cũ: {rel}");
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                RollBackChangedFiles(overwrittenBackups, newFiles, gameRoot, status);
-                throw;
+                var failures = RollBackChangedFiles(overwrittenBackups, newFiles, gameRoot, status);
+                if (failures.Count == 0)
+                {
+                    TryDeleteDirectory(backupRoot);
+                    throw;
+                }
+
+                // Giữ lại thư mục backup để người dùng có thể khôi phục thủ công.
+                throw new IOException(
+                    $"Cài đặt thất bại: {ex.Message}\n" +
+                    $"Không thể khôi phục {failures.Count} file về trạng thái ban đầu. " +
+                    $"Bản sao lưu được giữ tại: {backupRoot}",
+                    ex);
             }
-            finally
-            {
-                if (Directory.Exists(backupRoot))
-                    Directory.Delete(backupRoot, recursive: true);
-            }
+
+            TryDeleteDirectory(backupRoot);
         });
 
         var manifestPath = GetManifestPath(gamePath);
@@ -272,26 +208,6 @@ public class PatchManager
     private static string GetBepInExPath(string gamePath, string bepInExDirectory) =>
         Path.Combine(gamePath, bepInExDirectory);
 
-    private static string GetGraphicsConfigPath(string gamePath)
-    {
-        var bepInExDirectory = Directory.Exists(GetBepInExPath(gamePath, ActiveBepInExDirectory))
-            ? ActiveBepInExDirectory
-            : Directory.Exists(GetBepInExPath(gamePath, DisabledBepInExDirectory))
-                ? DisabledBepInExDirectory
-                : throw new DirectoryNotFoundException("Không tìm thấy BepInEx để lưu tuỳ chỉnh.");
-        return Path.Combine(gamePath, bepInExDirectory, "config", "com.hbrvipatch.graphics.cfg");
-    }
-
-    private static string GetMainPluginConfigPath(string gamePath)
-    {
-        var bepInExDirectory = Directory.Exists(GetBepInExPath(gamePath, ActiveBepInExDirectory))
-            ? ActiveBepInExDirectory
-            : Directory.Exists(GetBepInExPath(gamePath, DisabledBepInExDirectory))
-                ? DisabledBepInExDirectory
-                : throw new DirectoryNotFoundException("Không tìm thấy BepInEx để lưu tuỳ chỉnh.");
-        return Path.Combine(gamePath, bepInExDirectory, "config", "HBRTLFixUp.cfg");
-    }
-
     private static string GetManifestPath(
         string gamePath,
         string bepInExDirectory = ActiveBepInExDirectory) =>
@@ -307,29 +223,93 @@ public class PatchManager
         string bepInExDirectory = ActiveBepInExDirectory) =>
         Path.Combine(gamePath, bepInExDirectory, "Translation", LegacyManifestFile);
 
-    private static void RollBackChangedFiles(
+    private static string NormalizeRelativePath(string path) =>
+        path.Replace('\\', '/').TrimStart('/');
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
+        }
+        catch
+        {
+            // Thư mục tạm, không ảnh hưởng đến kết quả cài đặt.
+        }
+    }
+
+    private List<string> ReadPreviousManifestFiles(string gamePath)
+    {
+        var files = new List<string>();
+        foreach (var bepInExDirectory in BepInExDirectories)
+        {
+            foreach (var manifestPath in new[]
+            {
+                GetManifestPath(gamePath, bepInExDirectory),
+                GetLegacyJsonManifestPath(gamePath, bepInExDirectory)
+            })
+            {
+                if (!File.Exists(manifestPath)) continue;
+
+                try
+                {
+                    var manifest = JsonConvert.DeserializeObject<PatchManifest>(File.ReadAllText(manifestPath));
+                    if (manifest?.Files != null)
+                        files.AddRange(manifest.Files.Where(f => !string.IsNullOrWhiteSpace(f)));
+                }
+                catch
+                {
+                    // Manifest hỏng thì bỏ qua bước dọn file cũ.
+                }
+            }
+        }
+
+        return files.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static List<string> RollBackChangedFiles(
         IReadOnlyDictionary<string, string> overwrittenBackups,
         IEnumerable<string> newFiles,
         string gameRoot,
         IProgress<string>? status)
     {
+        var failures = new List<string>();
+
         foreach (var path in newFiles.Reverse())
         {
-            if (!path.StartsWith(gameRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(path))
-                continue;
+            try
+            {
+                if (!path.StartsWith(gameRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(path))
+                    continue;
 
-            File.Delete(path);
-            status?.Report($"Rollback: {Path.GetRelativePath(gameRoot, path)}");
+                File.Delete(path);
+                status?.Report($"Rollback: {Path.GetRelativePath(gameRoot, path)}");
+            }
+            catch
+            {
+                failures.Add(path);
+            }
         }
 
         foreach (var backup in overwrittenBackups.Reverse())
         {
-            if (!backup.Key.StartsWith(gameRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(backup.Value))
-                continue;
+            try
+            {
+                if (!backup.Key.StartsWith(gameRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(backup.Value))
+                    continue;
 
-            File.Copy(backup.Value, backup.Key, overwrite: true);
-            status?.Report($"Khôi phục: {Path.GetRelativePath(gameRoot, backup.Key)}");
+                Directory.CreateDirectory(Path.GetDirectoryName(backup.Key)!);
+                File.Copy(backup.Value, backup.Key, overwrite: true);
+                status?.Report($"Khôi phục: {Path.GetRelativePath(gameRoot, backup.Key)}");
+            }
+            catch
+            {
+                failures.Add(backup.Key);
+            }
         }
+
+        return failures;
     }
 
     public async Task UninstallAsync(string gamePath, IProgress<string>? status = null)
