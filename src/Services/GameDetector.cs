@@ -24,16 +24,65 @@ public static class GameDetector
             @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
         };
 
-        foreach (var regPath in uninstallPaths)
+        foreach (var hive in new[] { Registry.LocalMachine, Registry.CurrentUser })
         {
-            using var key = Registry.LocalMachine.OpenSubKey(regPath);
-            if (key == null) continue;
+            foreach (var regPath in uninstallPaths)
+            {
+                try
+                {
+                    var found = DetectFromUninstallKey(hive, regPath);
+                    if (found != null) return found;
+                }
+                catch (Exception ex)
+                {
+                    // Không đọc được key này (thiếu quyền, v.v.) thì bỏ qua và thử key khác
+                    System.Diagnostics.Debug.WriteLine($"Bỏ qua {regPath}: {ex.Message}");
+                }
+            }
+        }
 
-            foreach (var subKeyName in key.GetSubKeyNames())
+        var defaultPaths = new List<string> { @"C:\YostarGames\HeavenBurnsRed" };
+        try
+        {
+            foreach (var drive in DriveInfo.GetDrives())
+            {
+                try
+                {
+                    if (drive.DriveType != DriveType.Fixed || !drive.IsReady) continue;
+                    var root = drive.RootDirectory.FullName;
+                    defaultPaths.Add(Path.Combine(root, "YostarGames", "HeavenBurnsRed"));
+                    defaultPaths.Add(Path.Combine(root, "Games", "YostarGames", "HeavenBurnsRed"));
+                }
+                catch { }
+            }
+        }
+        catch { }
+
+        foreach (var defaultPath in defaultPaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                if (Directory.Exists(defaultPath) && ValidateGamePath(defaultPath))
+                    return defaultPath;
+            }
+            catch { }
+        }
+
+        return null;
+    }
+
+    private static string? DetectFromUninstallKey(RegistryKey hive, string regPath)
+    {
+        using var key = hive.OpenSubKey(regPath);
+        if (key == null) return null;
+
+        foreach (var subKeyName in key.GetSubKeyNames())
+        {
+            try
             {
                 using var subKey = key.OpenSubKey(subKeyName);
                 var displayName = subKey?.GetValue("DisplayName") as string;
-                if (displayName?.Contains("Heaven Burns Red") != true) continue;
+                if (displayName?.Contains("Heaven Burns Red", StringComparison.OrdinalIgnoreCase) != true) continue;
 
                 if (subKey?.GetValue("InstallLocation") is string loc
                     && Directory.Exists(loc)
@@ -42,7 +91,8 @@ public static class GameDetector
 
                 if (subKey?.GetValue("UninstallString") is string uninstall)
                 {
-                    // Lấy phần trong ngoặc kép hoặc trước space đầu tiên
+                    // Lấy phần trong ngoặc kép hoặc phần đến hết ".exe" đầu tiên
+                    uninstall = uninstall.Trim();
                     string exePath;
                     if (uninstall.StartsWith("\""))
                     {
@@ -51,7 +101,8 @@ public static class GameDetector
                     }
                     else
                     {
-                        exePath = uninstall.Split(' ')[0];
+                        var exeIndex = uninstall.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+                        exePath = exeIndex >= 0 ? uninstall[..(exeIndex + 4)] : uninstall;
                     }
 
                     var launcherDir = Path.GetDirectoryName(exePath);
@@ -66,11 +117,11 @@ public static class GameDetector
                         return candidate;
                 }
             }
+            catch
+            {
+                // Bỏ qua subkey lỗi (thiếu quyền, đường dẫn không hợp lệ, v.v.)
+            }
         }
-
-        var defaultPath = @"C:\YostarGames\HeavenBurnsRed";
-        if (Directory.Exists(defaultPath) && ValidateGamePath(defaultPath))
-            return defaultPath;
 
         return null;
     }

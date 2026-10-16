@@ -55,7 +55,7 @@ public partial class MainForm : Form
         RefreshStatus();
         _ = FetchLatestVersionAsync();
 
-        if (!GameDetector.ValidateGamePath(_txtGamePath.Text.Trim()))
+        if (!GameDetector.ValidateGamePath(GetGamePath()))
         {
             MessageBox.Show(
                 "Không tìm thấy thư mục cài đặt Heaven Burns Red.\nVui lòng chọn thư mục game thủ công bằng nút \"Duyệt...\".",
@@ -151,7 +151,7 @@ public partial class MainForm : Form
     }
     private void RefreshStatus()
     {
-        var path = _txtGamePath.Text.Trim();
+        var path = GetGamePath();
 
         if (string.IsNullOrEmpty(path) || !GameDetector.ValidateGamePath(path))
         {
@@ -291,31 +291,43 @@ public partial class MainForm : Form
         }
     }
 
-    private bool IsUpdateAvailable(string installedVersion) =>
-        !string.IsNullOrWhiteSpace(_latestReleaseVersion)
-        && !string.Equals(
-            NormalizeVersion(installedVersion),
-            NormalizeVersion(_latestReleaseVersion),
+    private bool IsUpdateAvailable(string installedVersion)
+    {
+        if (string.IsNullOrWhiteSpace(_latestReleaseVersion))
+            return false;
+
+        // Nếu cả hai phân tích được thì chỉ cập nhật khi bản mới thực sự cao hơn.
+        var comparison = PatchVersion.Compare(_latestReleaseVersion, installedVersion);
+        if (comparison.HasValue)
+            return comparison.Value > 0;
+
+        return !string.Equals(
+            PatchVersion.Normalize(installedVersion),
+            PatchVersion.Normalize(_latestReleaseVersion),
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string GetGamePath() => _txtGamePath.Text.Trim().Trim('"').Trim();
+
+    private static bool IsAccessDenied(Exception ex) =>
+        ex is UnauthorizedAccessException || ex.InnerException is UnauthorizedAccessException;
+
+    private static string BuildAccessDeniedMessage(string action) =>
+        $"Không có quyền ghi vào thư mục game nên không thể {action}.\n" +
+        "Hãy đóng trình cài đặt, nhấp chuột phải vào nó và chọn \"Run as administrator\" " +
+        "(Windows tiếng Việt: \"Chạy với quyền quản trị viên\"), sau đó thử lại.";
 
     private string GetUpdateButtonToolTip(string installedVersion, bool updateAvailable)
     {
         if (string.IsNullOrWhiteSpace(_latestReleaseVersion))
             return "Chưa thể kiểm tra bản cập nhật từ GitHub";
 
+        if (updateAvailable && string.Equals(installedVersion?.Trim(), "Không rõ", StringComparison.OrdinalIgnoreCase))
+            return $"Cập nhật lên {_latestReleaseVersion}";
+
         return updateAvailable
             ? $"Cập nhật từ {installedVersion} lên {_latestReleaseVersion}"
             : "Bạn đang sử dụng phiên bản mới nhất";
-    }
-
-    private static string NormalizeVersion(string version)
-    {
-        var normalized = version.Trim();
-        if (normalized.StartsWith("v.", StringComparison.OrdinalIgnoreCase))
-            return normalized[2..];
-        if (normalized.StartsWith('v') || normalized.StartsWith('V'))
-            return normalized[1..];
-        return normalized;
     }
 
     private async void BtnInstall_Click(object? sender, EventArgs e) => await RunInstall(false);
@@ -323,6 +335,28 @@ public partial class MainForm : Form
 
     private async Task RunInstall(bool isReinstall = false)
     {
+        if (!EnsureGameNotRunning(isReinstall ? "cập nhật" : "cài đặt"))
+            return;
+
+        if (!isReinstall)
+        {
+            var existingGamePath = GetGamePath();
+            if (Directory.Exists(Path.Combine(existingGamePath, "BepInEx"))
+                && !_patchManager.IsInstalled(existingGamePath))
+            {
+                var foreignWarning = MessageBox.Show(
+                    "Đã tìm thấy thư mục BepInEx/mod có sẵn trong thư mục game, không phải do trình cài đặt này cài.\n\n" +
+                    "Việc cài đặt sẽ ghi đè các tệp lõi của BepInEx và có thể làm hỏng các mod khác.\n" +
+                    "Hãy sao lưu thư mục BepInEx trước khi tiếp tục.\n\n" +
+                    "Bạn có muốn tiếp tục không?",
+                    "Phát hiện BepInEx có sẵn",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                if (foreignWarning != DialogResult.Yes) return;
+            }
+        }
+
         if (!ShowTermsAcceptance())
             return;
 
@@ -333,11 +367,12 @@ public partial class MainForm : Form
             MessageBoxIcon.Question);
         if (confirm != DialogResult.Yes) return;
 
-        var gamePath = _txtGamePath.Text.Trim();
+        var gamePath = GetGamePath();
         SetBusyState(true);
         ShowProgress(0);
         UpdateProgressStatus("Đang kiểm tra phiên bản mới nhất...", VsSubtleText);
         string? tempDir = null;
+        var failed = false;
 
         try
         {
@@ -345,6 +380,7 @@ public partial class MainForm : Form
             var release = await _github.GetLatestReleaseAsync();
             if (release == null)
             {
+                failed = true;
                 Log("✘ Không lấy được thông tin release.");
                 _progressBar.Value = 0;
                 UpdateProgressStatus("Không lấy được thông tin release", VsDanger);
@@ -391,10 +427,14 @@ public partial class MainForm : Form
         }
         catch (Exception ex)
         {
+            failed = true;
             Log($"✘ Lỗi: {ex.Message}");
             _progressBar.Value = 0;
             UpdateProgressStatus("Cài đặt thất bại", VsDanger);
-            MessageBox.Show($"Cài đặt thất bại:\n{ex.Message}", "Lỗi",
+            var installError = IsAccessDenied(ex)
+                ? BuildAccessDeniedMessage("cài đặt")
+                : $"Cài đặt thất bại:\n{ex.Message}";
+            MessageBox.Show(installError, "Lỗi",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
@@ -404,6 +444,8 @@ public partial class MainForm : Form
             await Task.Delay(1500);
             SetBusyState(false);
             RefreshStatus();
+            if (failed)
+                UpdateProgressStatus("Cài đặt thất bại", VsDanger);
         }
     }
 
@@ -415,6 +457,9 @@ public partial class MainForm : Form
 
     private async void BtnUninstall_Click(object? sender, EventArgs e)
     {
+        if (!EnsureGameNotRunning("gỡ cài đặt"))
+            return;
+
         var confirm = MessageBox.Show(
             "Thao tác này sẽ xóa bản Việt hóa và môi trường mod/plugin BepInEx khỏi thư mục game.\nBạn có chắc muốn tiếp tục không?",
             "Xác nhận", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
@@ -422,20 +467,35 @@ public partial class MainForm : Form
 
         SetBusyState(true);
         UpdateProgressStatus("Đang gỡ cài đặt...", VsSubtleText);
+        var failed = false;
         try
         {
             var progress = new Progress<string>(Log);
-            await _patchManager.UninstallAsync(_txtGamePath.Text.Trim(), progress);
+            await _patchManager.UninstallAsync(GetGamePath(), progress);
             UpdateProgressStatus("Gỡ cài đặt hoàn tất", VsSuccess);
             //Log("✔ Gỡ cài đặt thành công!");
         }
-        catch (Exception ex) { Log($"Lỗi: {ex.Message}"); UpdateProgressStatus("Gỡ cài đặt thất bại", VsDanger); }
-        finally { SetBusyState(false); RefreshStatus(); }
+        catch (Exception ex)
+        {
+            failed = true;
+            Log($"Lỗi: {ex.Message}");
+            UpdateProgressStatus("Gỡ cài đặt thất bại", VsDanger);
+            if (IsAccessDenied(ex))
+                MessageBox.Show(BuildAccessDeniedMessage("gỡ cài đặt"), "Lỗi",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetBusyState(false);
+            RefreshStatus();
+            if (failed)
+                UpdateProgressStatus("Gỡ cài đặt thất bại", VsDanger);
+        }
     }
 
     private async void BtnLaunchGame_Click(object? sender, EventArgs e)
     {
-        var exe = Path.Combine(_txtGamePath.Text.Trim(), "HeavenBurnsRed.exe");
+        var exe = Path.Combine(GetGamePath(), "HeavenBurnsRed.exe");
         if (!File.Exists(exe)) { Log("Lỗi: Không tìm thấy HeavenBurnsRed.exe"); return; }
 
         if (_isLaunchingGame)
@@ -480,13 +540,16 @@ public partial class MainForm : Form
         finally
         {
             _isLaunchingGame = false;
-            _btnLaunchGame.Enabled = GameDetector.ValidateGamePath(_txtGamePath.Text.Trim());
+            _btnLaunchGame.Enabled = GameDetector.ValidateGamePath(GetGamePath());
         }
     }
 
     private void BtnTogglePatch_Click(object? sender, EventArgs e)
     {
-        var gamePath = _txtGamePath.Text.Trim();
+        if (!EnsureGameNotRunning("bật hoặc tắt bản vá"))
+            return;
+
+        var gamePath = GetGamePath();
         var patchEnabled = _patchManager.IsPatchEnabled(gamePath);
         var patchDisabled = _patchManager.IsPatchDisabled(gamePath);
 
@@ -515,7 +578,9 @@ public partial class MainForm : Form
         {
             Log($"✘ Không thể {(enablePatch ? "bật" : "tắt")} bản vá: {ex.Message}");
             MessageBox.Show(
-                $"Không thể {(enablePatch ? "bật" : "tắt")} bản vá:\n{ex.Message}",
+                IsAccessDenied(ex)
+                    ? BuildAccessDeniedMessage(enablePatch ? "bật bản vá" : "tắt bản vá")
+                    : $"Không thể {(enablePatch ? "bật" : "tắt")} bản vá:\n{ex.Message}",
                 "Lỗi",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
@@ -867,6 +932,48 @@ public partial class MainForm : Form
         _txtGamePath.Enabled = !isBusy;
         _btnLaunchGame.Enabled = !isBusy && !_isLaunchingGame;
         _btnTogglePatch.Enabled = !isBusy;
+    }
+
+    private static bool IsGameRunning()
+    {
+        try
+        {
+            foreach (var process in Process.GetProcessesByName("HeavenBurnsRed"))
+            {
+                using (process)
+                {
+                    try
+                    {
+                        if (!process.HasExited)
+                            return true;
+                    }
+                    catch
+                    {
+                        // Tiến trình có thể thoát trong lúc đang kiểm tra.
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Không kiểm tra được thì coi như game không chạy.
+        }
+
+        return false;
+    }
+
+    private bool EnsureGameNotRunning(string action)
+    {
+        if (!IsGameRunning())
+            return true;
+
+        MessageBox.Show(
+            this,
+            $"Heaven Burns Red đang chạy. Hãy tắt game trước khi {action}.",
+            "Game đang chạy",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Warning);
+        return false;
     }
 
     private static bool IsGameMainWindowOpen(string processName)

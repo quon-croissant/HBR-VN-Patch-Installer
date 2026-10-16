@@ -25,10 +25,22 @@ public class GitHubService
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync();
         var releases = JArray.Parse(json);
-        var latest = releases.FirstOrDefault(release =>
+        var candidates = releases.Where(release =>
             release["draft"]?.Value<bool>() != true
             && release["assets"]?.Any(asset =>
-                asset["name"]?.ToString().EndsWith(".zip", StringComparison.OrdinalIgnoreCase) == true) == true);
+                asset["name"]?.ToString().EndsWith(".zip", StringComparison.OrdinalIgnoreCase) == true) == true)
+            .ToList();
+
+        // Chọn bản có phiên bản cao nhất trong các bản phân tích được; nếu không có bản nào thì giữ thứ tự của API.
+        JToken? latest = null;
+        foreach (var candidate in candidates)
+        {
+            var tag = candidate["tag_name"]?.ToString();
+            if (!PatchVersion.IsParseable(tag)) continue;
+            if (latest == null || PatchVersion.Compare(tag, latest["tag_name"]?.ToString()) > 0)
+                latest = candidate;
+        }
+        latest ??= candidates.FirstOrDefault();
 
         if (latest == null) return null;
 
@@ -49,7 +61,10 @@ public class GitHubService
         XNamespace atom = "http://www.w3.org/2005/Atom";
         const string tagMarker = "/releases/tag/";
 
-        foreach (var entry in feed.Descendants(atom + "entry"))
+        (string version, string downloadUrl, string fileName)? best = null;
+
+        // Chỉ xét tối đa 5 bản mới nhất để tránh gửi quá nhiều yêu cầu HTTP.
+        foreach (var entry in feed.Descendants(atom + "entry").Take(5))
         {
             var releaseUrl = entry.Elements(atom + "link")
                 .FirstOrDefault(link => link.Attribute("rel")?.Value == "alternate")?
@@ -70,33 +85,59 @@ public class GitHubService
                 new Uri("https://github.com"),
                 WebUtility.HtmlDecode(match.Groups["path"].Value)).AbsoluteUri;
             var fileName = Uri.UnescapeDataString(Path.GetFileName(new Uri(downloadUrl).AbsolutePath));
-            return (version, downloadUrl, fileName);
+            if (best == null
+                || PatchVersion.Compare(version, best.Value.version) > 0
+                || (!PatchVersion.IsParseable(best.Value.version) && PatchVersion.IsParseable(version)))
+                best = (version, downloadUrl, fileName);
         }
 
-        return null;
+        return best;
     }
 
     public async Task DownloadFileAsync(string url, string destPath,
-        IProgress<int>? progress = null)
+        IProgress<int>? progress = null, CancellationToken cancellationToken = default)
     {
-        using var response = await Http.GetAsync(url,
-            HttpCompletionOption.ResponseHeadersRead);
-        response.EnsureSuccessStatusCode();
-        var total = response.Content.Headers.ContentLength ?? -1;
+        var stallTimeout = TimeSpan.FromSeconds(60);
+        const string stallMessage =
+            "Tải về bị gián đoạn: không nhận được dữ liệu trong 60 giây. Hãy kiểm tra kết nối mạng và thử lại.";
 
-        await using var stream = await response.Content.ReadAsStreamAsync();
-        await using var file = File.Create(destPath);
-
-        var buffer = new byte[81920];
-        long downloaded = 0;
-        int read;
-
-        while ((read = await stream.ReadAsync(buffer)) > 0)
+        try
         {
-            await file.WriteAsync(buffer.AsMemory(0, read));
-            downloaded += read;
-            if (total > 0)
-                progress?.Report((int)(downloaded * 100 / total));
+            // Giới hạn thời gian chờ phản hồi đầu tiên (header) bằng cùng ngưỡng 60 giây
+            using var headerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            headerCts.CancelAfter(stallTimeout);
+            using var response = await Http.GetAsync(url,
+                HttpCompletionOption.ResponseHeadersRead, headerCts.Token);
+            response.EnsureSuccessStatusCode();
+            var total = response.Content.Headers.ContentLength ?? -1;
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var file = File.Create(destPath);
+
+            var buffer = new byte[81920];
+            long downloaded = 0;
+            int read;
+
+            while (true)
+            {
+                using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                readCts.CancelAfter(stallTimeout);
+                read = await stream.ReadAsync(buffer.AsMemory(), readCts.Token);
+                if (read <= 0) break;
+
+                await file.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                downloaded += read;
+                if (total > 0)
+                    progress?.Report((int)(downloaded * 100 / total));
+                else
+                    // Không biết dung lượng: báo số MB đã tải (tối đa 95) để thanh tiến trình vẫn nhúc nhích
+                    progress?.Report((int)Math.Min(95, downloaded / (1024 * 1024)));
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Không phải do người dùng hủy: nghĩa là quá thời gian chờ dữ liệu
+            throw new TimeoutException(stallMessage);
         }
     }
 

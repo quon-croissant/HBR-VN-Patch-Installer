@@ -97,6 +97,7 @@ public class PatchManager
     IProgress<int>? progress = null)
     {
         var installedPaths = new List<string>();
+        var previousFiles = ReadPreviousManifestFiles(gamePath);
         status?.Report("Đang giải nén...");
 
         await Task.Run(() =>
@@ -142,17 +143,50 @@ public class PatchManager
                     if (!wasExisting)
                         newFiles.Add(destPath);
                 }
+
+                // Xóa các file của bản cũ không còn trong gói mới.
+                var newEntrySet = new HashSet<string>(
+                    entries.Select(e => NormalizeRelativePath(e.FullName)),
+                    StringComparer.OrdinalIgnoreCase);
+                foreach (var rel in previousFiles)
+                {
+                    if (newEntrySet.Contains(NormalizeRelativePath(rel)))
+                        continue;
+
+                    var stalePath = Path.GetFullPath(Path.Combine(gamePath, rel));
+                    if (!stalePath.StartsWith(gameRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(stalePath))
+                        continue;
+
+                    if (!overwrittenBackups.ContainsKey(stalePath))
+                    {
+                        Directory.CreateDirectory(backupRoot);
+                        var backupPath = Path.Combine(backupRoot, Guid.NewGuid().ToString("N"));
+                        File.Copy(stalePath, backupPath, overwrite: false);
+                        overwrittenBackups.Add(stalePath, backupPath);
+                    }
+
+                    File.Delete(stalePath);
+                    status?.Report($"Xóa file cũ: {rel}");
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                RollBackChangedFiles(overwrittenBackups, newFiles, gameRoot, status);
-                throw;
+                var failures = RollBackChangedFiles(overwrittenBackups, newFiles, gameRoot, status);
+                if (failures.Count == 0)
+                {
+                    TryDeleteDirectory(backupRoot);
+                    throw;
+                }
+
+                // Giữ lại thư mục backup để người dùng có thể khôi phục thủ công.
+                throw new IOException(
+                    $"Cài đặt thất bại: {ex.Message}\n" +
+                    $"Không thể khôi phục {failures.Count} file về trạng thái ban đầu. " +
+                    $"Bản sao lưu được giữ tại: {backupRoot}",
+                    ex);
             }
-            finally
-            {
-                if (Directory.Exists(backupRoot))
-                    Directory.Delete(backupRoot, recursive: true);
-            }
+
+            TryDeleteDirectory(backupRoot);
         });
 
         var manifestPath = GetManifestPath(gamePath);
@@ -189,29 +223,93 @@ public class PatchManager
         string bepInExDirectory = ActiveBepInExDirectory) =>
         Path.Combine(gamePath, bepInExDirectory, "Translation", LegacyManifestFile);
 
-    private static void RollBackChangedFiles(
+    private static string NormalizeRelativePath(string path) =>
+        path.Replace('\\', '/').TrimStart('/');
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
+        }
+        catch
+        {
+            // Thư mục tạm, không ảnh hưởng đến kết quả cài đặt.
+        }
+    }
+
+    private List<string> ReadPreviousManifestFiles(string gamePath)
+    {
+        var files = new List<string>();
+        foreach (var bepInExDirectory in BepInExDirectories)
+        {
+            foreach (var manifestPath in new[]
+            {
+                GetManifestPath(gamePath, bepInExDirectory),
+                GetLegacyJsonManifestPath(gamePath, bepInExDirectory)
+            })
+            {
+                if (!File.Exists(manifestPath)) continue;
+
+                try
+                {
+                    var manifest = JsonConvert.DeserializeObject<PatchManifest>(File.ReadAllText(manifestPath));
+                    if (manifest?.Files != null)
+                        files.AddRange(manifest.Files.Where(f => !string.IsNullOrWhiteSpace(f)));
+                }
+                catch
+                {
+                    // Manifest hỏng thì bỏ qua bước dọn file cũ.
+                }
+            }
+        }
+
+        return files.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static List<string> RollBackChangedFiles(
         IReadOnlyDictionary<string, string> overwrittenBackups,
         IEnumerable<string> newFiles,
         string gameRoot,
         IProgress<string>? status)
     {
+        var failures = new List<string>();
+
         foreach (var path in newFiles.Reverse())
         {
-            if (!path.StartsWith(gameRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(path))
-                continue;
+            try
+            {
+                if (!path.StartsWith(gameRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(path))
+                    continue;
 
-            File.Delete(path);
-            status?.Report($"Rollback: {Path.GetRelativePath(gameRoot, path)}");
+                File.Delete(path);
+                status?.Report($"Rollback: {Path.GetRelativePath(gameRoot, path)}");
+            }
+            catch
+            {
+                failures.Add(path);
+            }
         }
 
         foreach (var backup in overwrittenBackups.Reverse())
         {
-            if (!backup.Key.StartsWith(gameRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(backup.Value))
-                continue;
+            try
+            {
+                if (!backup.Key.StartsWith(gameRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(backup.Value))
+                    continue;
 
-            File.Copy(backup.Value, backup.Key, overwrite: true);
-            status?.Report($"Khôi phục: {Path.GetRelativePath(gameRoot, backup.Key)}");
+                Directory.CreateDirectory(Path.GetDirectoryName(backup.Key)!);
+                File.Copy(backup.Value, backup.Key, overwrite: true);
+                status?.Report($"Khôi phục: {Path.GetRelativePath(gameRoot, backup.Key)}");
+            }
+            catch
+            {
+                failures.Add(backup.Key);
+            }
         }
+
+        return failures;
     }
 
     public async Task UninstallAsync(string gamePath, IProgress<string>? status = null)
